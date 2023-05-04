@@ -146,7 +146,7 @@ sub update_outage
 	$newrec{selector} = {};
 	if (ref($args{selector}) eq "HASH")
 	{
-		for my $cat (qw(node config))
+		for my $cat (qw(node config element))
 		{
 			my $catsel = $args{selector}->{$cat};
 			next if (ref($catsel) ne "HASH");
@@ -453,7 +453,7 @@ sub purge_outages
 sub check_outages
 {
 	my (%args) = @_;
-	my ($when,$node,$nmisng) = @args{"time","node","nmisng"};
+	my ($when,$node,$nmisng,$element) = @args{"time","node","nmisng","element"};
 
 	return { error => "cannot check outages without valid time argument!" }
 	if (!$when or $when !~ /^\d+(\.d+)?$/);
@@ -478,6 +478,12 @@ sub check_outages
 	{
 		$nodeconfig = $node->configuration;
 		my ($catchall,$error) = $node->inventory(concept => "catchall");
+		
+		$nodeconfig->{'catchall.data.nodeType'} =  $catchall->data->{nodeType};
+		$nodeconfig->{'catchall.data.nodeVendor'} = $catchall->data->{nodeVendor};
+		$nodeconfig->{'catchall.data.nodestatus'} = $catchall->data->{nodestatus};
+		$nodeconfig->{'configuration.group'} =  $catchall->data->{group};
+		$nodeconfig->{'configuration.roleType'} =  $catchall->data->{roleType};
 		$nodemodel = $catchall->data->{nodeModel} if (!$error
 																									&& ref($catchall) =~ /^NMISNG::Inventory::/
 																									&& ref($catchall->data) eq "HASH");
@@ -492,7 +498,7 @@ sub check_outages
 		if ($node)
 		{
 			my $rulematches = 1;
-			for my $selcat (qw(config node))
+			for my $selcat (qw(config node element))
 			{
 				next if (ref($maybeout->{selector}->{$selcat}) ne "HASH");
 
@@ -502,9 +508,14 @@ sub check_outages
 												$globalconfig->{$propname} :
 												$propname eq "nodeModel"? $nodemodel
 												# uuid, cluster_id, name, activated.NMIS, overrides live OUTSIDE of configuration!
-												: $propname =~ /^(uuid|cluster_id|name)$/?
+												: $propname =~ /^(uuid|cluster_id|name)$/ ?
 												$node->$propname
 												: $nodeconfig->{$propname});
+
+					
+					if ($selcat eq 'element'){
+						$actual = $element;
+					}
 					# choices can be: regex, or fixed string, or array of fixed strings
 					my $expected = $maybeout->{selector}->{$selcat}->{$propname};
 
@@ -654,13 +665,14 @@ sub outageCheck
 
 	my $node = $args{node};
 	my $time = $args{time};
+	my $element = $args{element};
 
 	confess("outageCheck impossible: invalid node argument!")
 			if (ref($node) ne "NMISNG::Node");
 	my $nmisng = $node->nmisng;
 	my $nodename = $node->name;
 
-	my $nodeoutages = check_outages(node => $node, time => $time, nmisng => $nmisng);
+	my $nodeoutages = check_outages(node => $node, time => $time, nmisng => $nmisng, element => $element );
 	if (!$nodeoutages->{success})
 	{
 		$nmisng->log->error("failed to check $nodename outages: $nodeoutages->{error}");
@@ -684,7 +696,7 @@ sub outageCheck
 		# ignore nonexistent stuff, defaults and circular self-dependencies
 		next if ($nd =~ m!^(N/A|$nodename)?$!);
 		my $depnode = $nmisng->node(name => $nd);
-		my $depoutages = check_outages(node => $depnode, time => $time, nmisng => $nmisng);
+		my $depoutages = check_outages(node => $depnode, time => $time, nmisng => $nmisng , element => $element);
 		if (!$depoutages->{success})
 		{
 			$nmisng->log->error("failed to check $nd outages (dependency of $nodename): $depoutages->{error}");
